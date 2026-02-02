@@ -10147,7 +10147,7 @@
                                     Object.assign(h.style, { background: "linear-gradient(135deg, #b053e2, #745bd8)", position: "relative" });
                                     let p = document.createElement("img");
                                     (p.src =
-                                        "https://drive.google.com/uc?export=view&id=1uL9eUZ2WpwBSwPY6Ukncr-l1sI-_BOD1"),
+                                        "https://drive.google.com/thumbnail?id=15ERHAf-9n0oTZ8d562CcW1BcNzffkuQQ&sz=s800"),
                                         (p.alt = "Agent GIF"),
                                         Object.assign(p.style, { width: "100%", height: "235px", display: "block", objectFit: "cover" }),
                                         h.appendChild(p);
