@@ -10207,7 +10207,7 @@
                                     Object.assign(b.style, { background: "linear-gradient(135deg, #b053e2, #745bd8)", position: "relative" });
                                     let $ = document.createElement("img");
                                     ($.src =
-                                        "https://drive.google.com/thumbnail?id=1H5vl5RmFuYyMuhQI-fSfxlaay8QxEDcW&sz=s800"),
+                                        "https://drive.google.com/thumbnail?id=15ERHAf-9n0oTZ8d562CcW1BcNzffkuQQ&sz=s800"),
                                         ($.alt = "Agent GIF"),
                                         Object.assign($.style, { width: "100%", height: "235px", display: "block", objectFit: "cover" }),
                                         b.appendChild($);
