@@ -10153,7 +10153,7 @@
                                         h.appendChild(p);
                                     let f = document.createElement("div");
                                     (f.id = "name-container"),
-                                    (f.textContent = "Logan"),
+                                    (f.textContent = "Clara"),
                                         Object.assign(f.style, {
                                             position: "absolute",
                                             bottom: "40px",
