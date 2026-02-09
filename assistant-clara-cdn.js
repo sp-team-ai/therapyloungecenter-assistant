@@ -10026,6 +10026,7 @@
                 .vapi-btn-volume-${h} {
                 box-shadow: 1px 1px ${5 + 2 * h}px ${2 * h}px ${n.color}, inset 0px 0px 10px 0px rgba(0,0,0,0.1);
                 }
+
                 @media (max-width: 1600px) {
                     #vapi-icon-container {
                         width:185px !important;
@@ -10092,6 +10093,140 @@
                 var c, l, u, d, h, p, f;
                 let g = new aU(t),
                     v = aB(o),
+                    currentAudioLevel = 0,
+                    initSphereVisualizer = (canvas) => {
+                        const ctx = canvas.getContext('2d');
+                        const dpr = window.devicePixelRatio || 1;
+                        const rect = canvas.getBoundingClientRect();
+                        canvas.width = rect.width * dpr;
+                        canvas.height = rect.height * dpr;
+                        ctx.scale(dpr, dpr);
+
+                        let width = rect.width;
+                        let height = rect.height;
+                        
+                        let points = [];
+                        const numPoints = 750;
+                        const globeRadius = Math.min(width, height) * 0.28; // Reduced size
+                        const perspective = width * 2;
+                        let time = 0;
+                        let rotationX = 0;
+                        let rotationY = 0;
+                        let rotationSpeed = 0.0012;
+                        let smoothPulse = 0;
+                        let currentDistortionIntensity = 0;
+                        let animationId;
+
+                        const phi = Math.PI * (3 - Math.sqrt(5));
+                        for (let i = 0; i < numPoints; i++) {
+                            const y = 1 - (i / (numPoints - 1)) * 2;
+                            const r = Math.sqrt(1 - y * y);
+                            const theta = phi * i;
+                            points.push({ baseX: Math.cos(theta) * r, baseY: y, baseZ: Math.sin(theta) * r });
+                        }
+
+                        function draw() {
+                            ctx.clearRect(0, 0, width, height);
+                            
+                            const isSpeaking = !!canvas.closest('.vapi-btn-is-speaking');
+                            
+                            time += 0.015;
+                            
+                            const targetSpeed = isSpeaking ? 0.005 : 0.0012;
+                            rotationSpeed += (targetSpeed - rotationSpeed) * 0.03;
+                            
+                            rotationY += rotationSpeed;
+                            rotationX = Math.sin(time * 0.2) * 0.03;
+                            
+                            const cx = width / 2;
+                            const cy = height / 2;
+                            
+                            const cosY = Math.cos(rotationY);
+                            const sinY = Math.sin(rotationY);
+                            const cosX = Math.cos(rotationX);
+                            const sinX = Math.sin(rotationX);
+                            
+                            let targetPulse = 0;
+                            let targetDistIntensity = 0;
+                            
+                            if (isSpeaking) {
+                                // Use audio level for dynamic pulse
+                                const audioBoost = currentAudioLevel * 0.08;
+                                targetPulse = Math.sin(time * 3) * 0.02 + Math.sin(time * 7) * 0.008 + audioBoost;
+                                targetDistIntensity = Math.max(0.3, currentAudioLevel * 1.5); // More reactive to audio
+                            } else {
+                                targetPulse = Math.sin(time * 0.5) * 0.005;
+                                targetDistIntensity = 0;
+                            }
+                            
+                            smoothPulse += (targetPulse - smoothPulse) * 0.1;
+                            currentDistortionIntensity += (targetDistIntensity - currentDistortionIntensity) * 0.08;
+                            
+                            const currentRadius = globeRadius * (1 + smoothPulse);
+
+                            points.forEach(p => {
+                                let x = p.baseX * cosY - p.baseZ * sinY;
+                                let z = p.baseZ * cosY + p.baseX * sinY;
+                                let y = p.baseY * cosX - z * sinX;
+                                z = z * cosX + p.baseY * sinX;
+                                
+                                let distortion = 1.0;
+                                
+                                if (currentDistortionIntensity > 0.01) {
+                                    // Calculate position on sphere for wave distribution
+                                    const angle = Math.atan2(y, x);
+                                    const polar = Math.acos(Math.max(-1, Math.min(1, y)));
+                                    
+                                    // Moderate frequency bands for defined peaks
+                                    const wave1 = Math.sin(angle * 4 + time * 2.8 + currentAudioLevel * 6);
+                                    const wave2 = Math.cos(polar * 5 - time * 2.3 + currentAudioLevel * 5);
+                                    const wave3 = Math.sin(angle * 3 + polar * 3 + time * 3.2);
+                                    
+                                    // Combine waves
+                                    let wave = (wave1 * 0.5 + wave2 * 0.35 + wave3 * 0.15);
+                                    
+                                    // Create pointy peaks (lower power = sharper)
+                                    wave = Math.pow((wave + 1) / 2, 1.3);
+                                    
+                                    // Audio-reactive intensity
+                                    const audioReactive = 0.45 + currentAudioLevel * 1.0;
+                                    const maxDisplacement = 0.32 * audioReactive;
+                                    
+                                    // Depth masking for front emphasis
+                                    const depthMask = Math.pow(Math.max(0, 1 - Math.abs(z) * 0.35), 1.3);
+                                    
+                                    // Calculate distortion with pointy peaks
+                                    distortion = 1 + (wave * maxDisplacement * depthMask * currentDistortionIntensity);
+                                }
+
+                                const scale = perspective / (perspective + z * currentRadius);
+                                if (scale > 0) {
+                                    const screenX = cx + (x * currentRadius * distortion) * scale;
+                                    const screenY = cy + (y * currentRadius * distortion) * scale;
+                                    const alpha = Math.max(0.12, (scale - 0.5) * 1.8);
+                                    
+                                    ctx.beginPath();
+                                    // Moderate size variation for visible peaks
+                                    const baseSize = 1.3;
+                                    const waveBoost = (distortion - 1) * 0.9;
+                                    const size = (baseSize + waveBoost) * scale;
+                                    ctx.arc(screenX, screenY, size, 0, Math.PI * 2);
+                                    
+                                    if (isSpeaking) {
+                                        // Gentle brightness variation
+                                        const brightness = Math.min(1, 0.75 + (distortion - 1) * 0.3 + currentAudioLevel * 0.2);
+                                        ctx.fillStyle = `rgba(255, 255, 255, ${alpha * brightness})`;
+                                    } else {
+                                        ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+                                    }
+                                    ctx.fill();
+                                }
+                            });
+                            animationId = requestAnimationFrame(draw);
+                        }
+                        draw();
+                        return () => cancelAnimationFrame(animationId);
+                    },
                     m =
                         ((c = o),
                         (t, i) => {
@@ -10109,8 +10244,8 @@
                                         (r.style.width = "fit-content"),
                                         (r.style.fontFamily = "Arial, sans-serif"),
                                         (r.style.color = "#333"),
-                                        (r.style.fontSize = "14px"),
-                                        (r.style.boxShadow = "0px 2px 4px rgba(0, 0, 0, 0.1)");
+                                        (r.style.fontSize = "14px");
+                                        // (r.style.boxShadow = "0px 2px 4px rgba(0, 0, 0, 0.1)");
                                     let a = document.createElement("div");
                                     (a.style.display = "flex"), (a.style.flexDirection = "column"), (a.style.alignItems = "flex-start"), (a.style.marginRight = "10px");
                                     let s = document.createElement("div");
@@ -10140,32 +10275,48 @@
                                         t.appendChild(r);
                                 } else if ("round" === n.type) {
                                     t.classList.add("vapi-btn-pill");
+                                    t.style.background = "transparent";
+                                    t.style.boxShadow = "none";
                                     let d = document.createElement("div");
                                     (d.id = "vapi-icon-container"),
-                                        Object.assign(d.style, { width: "251px", fontFamily: "Arial, sans-serif", color: "#fff", borderRadius: "20px", overflow: "hidden", background: "white", position: "relative" });
+                                        Object.assign(d.style, { 
+                                            width: "251px", 
+                                            fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif", 
+                                            color: "#fff", 
+                                            borderRadius: "24px", 
+                                            overflow: "hidden", 
+                                            background: "url('https://drive.google.com/thumbnail?id=15ERHAf-9n0oTZ8d562CcW1BcNzffkuQQ&sz=s800') center top / cover no-repeat", 
+                                            position: "relative", 
+                                            boxShadow: "0 12px 28px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.05)" 
+                                        });
                                     let h = document.createElement("div");
-                                    Object.assign(h.style, { background: "linear-gradient(135deg, #b053e2, #745bd8)", position: "relative" });
-                                    let p = document.createElement("img");
-                                    (p.src =
-                                        "https://drive.google.com/thumbnail?id=15ERHAf-9n0oTZ8d562CcW1BcNzffkuQQ&sz=s800"),
-                                        (p.alt = "Agent GIF"),
-                                        Object.assign(p.style, { width: "100%", height: "235px", display: "block", objectFit: "cover" }),
-                                        h.appendChild(p);
+                                    Object.assign(h.style, { position: "relative", height: "235px" });
+                                    // Image element removed, using background on container 'd' instead
                                     let f = document.createElement("div");
                                     (f.id = "name-container"),
                                     (f.textContent = "Clara"),
                                         Object.assign(f.style, {
                                             position: "absolute",
-                                            bottom: "40px",
-                                            left: "50%",
-                                            width: "150px",
-                                            transform: "translateX(-50%)",
-                                            padding: "8px 20px",
-                                            borderRadius: "16px",
-                                            background: "rgba(162, 142, 165, 0.44)",
-                                            fontSize: "14px",
-                                            fontWeight: "bold",
-                                            color: "#f8f8f8",
+                                            bottom: "0",
+                                            left: "0",
+                                            width: "100%",
+                                            height: "100px",
+                                            transform: "none",
+                                            padding: "0 0 45px 0",
+                                            borderRadius: "0",
+                                            background: "linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0) 100%)",
+                                            backdropFilter: "none",
+                                            WebkitBackdropFilter: "none",
+                                            border: "none",
+                                            display: "flex",
+                                            alignItems: "flex-end",
+                                            justifyContent: "center",
+                                            fontSize: "18px",
+                                            letterSpacing: "0.8px",
+                                            fontWeight: "600",
+                                            color: "#fff",
+                                            textShadow: "0 2px 4px rgba(0,0,0,0.3)",
+                                            pointerEvents: "none"
                                         }),
                                         h.appendChild(f);
                                     let g = document.createElement("div");
@@ -10184,7 +10335,7 @@
                                         display: "flex",
                                         justifyContent: "center",
                                         alignItems: "center",
-                                        boxShadow: "0 0 12px 6px rgba(124, 124, 124, 0.4)",
+                                        boxShadow: "0 6px 16px rgba(65, 206, 84, 0.4)",
                                         cursor: "pointer",
                                         zIndex: "5",
                                     });
@@ -10204,15 +10355,36 @@
                                     (y.id = "vapi-icon-container"),
                                         Object.assign(y.style, { width: "251px", fontFamily: "Arial, sans-serif", color: "#fff", borderRadius: "20px", overflow: "hidden", background: "white", position: "relative" });
                                     let b = document.createElement("div");
-                                    Object.assign(b.style, { background: "linear-gradient(135deg, #b053e2, #745bd8)", position: "relative" });
-                                    let $ = document.createElement("img");
-                                    ($.src =
-                                        "https://drive.google.com/thumbnail?id=15ERHAf-9n0oTZ8d562CcW1BcNzffkuQQ&sz=s800"),
-                                        ($.alt = "Agent GIF"),
-                                        Object.assign($.style, { width: "100%", height: "235px", display: "block", objectFit: "cover" }),
-                                        b.appendChild($);
+                                    Object.assign(b.style, { background: "linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)", position: "relative", height: "235px", width: "100%", overflow: "hidden" });
+                                    
+                                    // Add decorative background elements
+                                    let bgDecor = document.createElement("div");
+                                    Object.assign(bgDecor.style, {
+                                        position: "absolute",
+                                        top: "0",
+                                        left: "0",
+                                        width: "100%",
+                                        height: "100%",
+                                        pointerEvents: "none",
+                                        zIndex: "1"
+                                    });
+                                    bgDecor.innerHTML = `
+                                        <div style="position: absolute; width: 150px; height: 150px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 255, 255, 0.15) 0%, transparent 70%); top: -40px; right: -40px;"></div>
+                                        <div style="position: absolute; width: 100px; height: 100px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%); bottom: 30px; left: -30px;"></div>
+                                        <div style="position: absolute; width: 80px; height: 80px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 255, 255, 0.08) 0%, transparent 70%); top: 50%; right: 20px;"></div>
+                                    `;
+                                    b.appendChild(bgDecor);
+                                    
+                                    let $ = document.createElement("canvas");
+                                    Object.assign($.style, { width: "100%", height: "100%", display: "block", position: "relative", zIndex: "2" });
+                                    b.appendChild($);
+                                    
+                                    // Start visualizer and store cleanup
+                                    let stopViz = null;
+                                    setTimeout(() => { stopViz = initSphereVisualizer($); }, 50);
+
                                     let k = document.createElement("div");
-                                    (k.textContent = "00:01"), Object.assign(k.style, { position: "absolute", top: "8px", left: "12px", fontSize: "14px", fontWeight: "bold", color: "#fff", zIndex: "2" }), b.appendChild(k);
+                                    (k.textContent = "00:01"), Object.assign(k.style, { position: "absolute", top: "15px", left: "0", right: "0", margin: "auto", width: "fit-content", fontSize: "14px", fontWeight: "600", color: "#64748b", zIndex: "2", background: "rgba(241, 245, 249, 0.8)", padding: "4px 12px", borderRadius: "20px" }), b.appendChild(k);
                                     let S = 1;
                                     setInterval(() => {
                                         S++;
@@ -10220,54 +10392,145 @@
                                             i = String(S % 60).padStart(2, "0");
                                         k.textContent = `${t}:${i}`;
                                     }, 1e3);
-                                    let w = document.createElement("div");
-                                    (w.id = "name-container"),
-                                    (w.textContent = "Clara"),
-                                        Object.assign(w.style, {
-                                            position: "absolute",
-                                            bottom: "40px",
-                                            left: "50%",
-                                            width: "150px",
-                                            transform: "translateX(-50%)",
-                                            padding: "8px 20px",
-                                            borderRadius: "16px",
-                                            background: "rgba(165, 165, 165, 0.42)",
-                                            fontSize: "14px",
-                                            fontWeight: "bold",
-                                            color: "#fff",
-                                        }),
-                                        b.appendChild(w);
+                                    // Name container removed
                                     let T = document.createElement("div");
-                                    Object.assign(T.style, { height: "40px", backgroundColor: "#fff" }), y.appendChild(b), y.appendChild(T);
-                                    let C = document.createElement("div");
-                                    (C.id = "call-icon"),
-                                    Object.assign(C.style, {
-                                        width: "48px",
-                                        height: "48px",
-                                        backgroundColor: "rgb(253, 95, 74)",
-                                        borderRadius: "50%",
+                                    Object.assign(T.style, { 
+                                        height: "40px", 
+                                        backgroundColor: "#fff",
+                                        boxShadow: "0 -2px 10px rgba(0, 0, 0, 0.08)"
+                                    }), y.appendChild(b), y.appendChild(T);
+                                    // Button Container
+                                    let btnContainer = document.createElement("div");
+                                    Object.assign(btnContainer.style, {
                                         position: "absolute",
-                                        left: "50%",
                                         bottom: "12px",
+                                        left: "50%",
                                         transform: "translateX(-50%)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "16px",
+                                        zIndex: "10"
+                                    });
+
+                                    // Mic Button (Mute/Unmute)
+                                    let isMuted = false;
+                                    let micBtn = document.createElement("div");
+                                    Object.assign(micBtn.style, {
+                                        width: "42px",
+                                        height: "42px",
+                                        backgroundColor: "#fff",
+                                        borderRadius: "50%",
                                         display: "flex",
                                         justifyContent: "center",
                                         alignItems: "center",
-                                        boxShadow: "0 0 12px 6px rgba(253, 95, 74, 0.4)",
+                                        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(255, 255, 255, 0.5)",
                                         cursor: "pointer",
-                                        zIndex: "5",
+                                        transition: "all 0.2s ease"
+                                    });
+                                    let micIcon = document.createElement("img");
+                                    micIcon.src = "https://api.iconify.design/lucide:mic.svg?color=%23475569";
+                                    Object.assign(micIcon.style, { width: "18px", height: "18px" });
+                                    micBtn.appendChild(micIcon);
+                                    micBtn.addEventListener("click", (e) => {
+                                        e.stopPropagation(); // Prevent click from bubbling to parent
+                                        isMuted = !isMuted;
+                                        if (isMuted) {
+                                            micIcon.src = "https://api.iconify.design/lucide:mic-off.svg?color=%23ef4444";
+                                            micBtn.style.backgroundColor = "#fee2e2";
+                                            // Mute microphone using Daily call object
+                                            if (g && g.call) {
+                                                g.call.setLocalAudio(false);
+                                            }
+                                        } else {
+                                            micIcon.src = "https://api.iconify.design/lucide:mic.svg?color=%23475569";
+                                            micBtn.style.backgroundColor = "#fff";
+                                            // Unmute microphone
+                                            if (g && g.call) {
+                                                g.call.setLocalAudio(true);
+                                            }
+                                        }
+                                    });
+                                    micBtn.addEventListener("mouseenter", () => { micBtn.style.transform = "scale(1.05)"; });
+                                    micBtn.addEventListener("mouseleave", () => { micBtn.style.transform = "scale(1)"; });
+
+                                    // End Call Button (Center)
+                                    let C = document.createElement("div");
+                                    (C.id = "call-icon"),
+                                    Object.assign(C.style, {
+                                        width: "50px",
+                                        height: "50px",
+                                        backgroundColor: "rgb(253, 95, 74)",
+                                        borderRadius: "50%",
+                                        display: "flex",
+                                        justifyContent: "center",
+                                        alignItems: "center",
+                                        boxShadow: "0 6px 20px rgba(253, 95, 74, 0.5), 0 0 0 3px rgba(255, 255, 255, 0.3)",
+                                        cursor: "pointer",
+                                        transition: "all 0.2s ease"
+                                    });
+                                    C.addEventListener("click", (e) => {
+                                        e.stopPropagation(); // Prevent double-triggering
+                                        // End call logic will be handled by parent click handler
+                                        u.click(); // Trigger the main button click to end call
                                     });
                                     C.addEventListener("mouseenter", () => {
-                                        C.style.backgroundColor = "rgb(233, 75, 54)"; // slightly darker for hover
+                                        C.style.backgroundColor = "rgb(233, 75, 54)";
+                                        C.style.transform = "scale(1.05)";
                                     });
-                                    
                                     C.addEventListener("mouseleave", () => {
-                                        C.style.backgroundColor = "rgb(253, 95, 74)"; // original base color
+                                        C.style.backgroundColor = "rgb(253, 95, 74)";
+                                        C.style.transform = "scale(1)";
                                     });
-                                    C.style.transition = "background-color 0.2s ease";
-
                                     let E = document.createElement("img");
-                                    (E.src = "https://i.imghippo.com/files/ca2892Nik.png"), (E.alt = "End Call"), Object.assign(E.style, { width: "32px", height: "32px" }), C.appendChild(E), y.appendChild(C), t.appendChild(y);
+                                    (E.src = "https://i.imghippo.com/files/ca2892Nik.png"), (E.alt = "End Call"), Object.assign(E.style, { width: "24px", height: "24px" }), C.appendChild(E);
+
+                                    // Speaker Button (Volume)
+                                    let isSpeakerMuted = false;
+                                    let speakerBtn = document.createElement("div");
+                                    Object.assign(speakerBtn.style, {
+                                        width: "42px",
+                                        height: "42px",
+                                        backgroundColor: "#fff",
+                                        borderRadius: "50%",
+                                        display: "flex",
+                                        justifyContent: "center",
+                                        alignItems: "center",
+                                        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(255, 255, 255, 0.5)",
+                                        cursor: "pointer",
+                                        transition: "all 0.2s ease"
+                                    });
+                                    let speakerIcon = document.createElement("img");
+                                    speakerIcon.src = "https://api.iconify.design/lucide:volume-2.svg?color=%23475569";
+                                    Object.assign(speakerIcon.style, { width: "18px", height: "18px" });
+                                    speakerBtn.appendChild(speakerIcon);
+                                    speakerBtn.addEventListener("click", (e) => {
+                                        e.stopPropagation(); // Prevent click from bubbling to parent
+                                        isSpeakerMuted = !isSpeakerMuted;
+                                        
+                                        // Toggle all remote audio elements (AI voice)
+                                        const audioElements = document.querySelectorAll('audio[data-participant-id]');
+                                        audioElements.forEach(audio => {
+                                            audio.muted = isSpeakerMuted;
+                                        });
+                                        
+                                        // Update UI
+                                        if (isSpeakerMuted) {
+                                            speakerIcon.src = "https://api.iconify.design/lucide:volume-x.svg?color=%23ef4444";
+                                            speakerBtn.style.backgroundColor = "#fee2e2";
+                                        } else {
+                                            speakerIcon.src = "https://api.iconify.design/lucide:volume-2.svg?color=%23475569";
+                                            speakerBtn.style.backgroundColor = "#fff";
+                                        }
+                                    });
+                                    speakerBtn.addEventListener("mouseenter", () => { speakerBtn.style.transform = "scale(1.05)"; });
+                                    speakerBtn.addEventListener("mouseleave", () => { speakerBtn.style.transform = "scale(1)"; });
+
+                                    // Assemble buttons
+                                    btnContainer.appendChild(micBtn);
+                                    btnContainer.appendChild(C);
+                                    btnContainer.appendChild(speakerBtn);
+                                    y.appendChild(btnContainer);
+                                    t.appendChild(y);
                                 }
                             } else console.warn(`No config found for type: ${i}`);
                         }),
@@ -10300,6 +10563,7 @@
                     l.on("volume-level", (t) => {
                         for (let i = 0; i <= 10; i++) u.classList.remove(`vapi-btn-volume-${i}`);
                         u.classList.add(`vapi-btn-volume-${Math.floor(10 * t)}`);
+                        currentAudioLevel = t; // Update for visualizer sync
                     }),
                     (window.vapiSDK.vapi = g),
                     g
